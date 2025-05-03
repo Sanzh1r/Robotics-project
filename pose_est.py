@@ -1,21 +1,14 @@
 import cv2
-
 import numpy as np
-
 import rclpy
-
 from rclpy.node import Node
-
 from sensor_msgs.msg import Image
-
 from cv_bridge import CvBridge
 
 
 
 class PoseEstimationNode(Node):
-
     def __init__(self):
-
         super().__init__('pose_estimation_node')
 
         self.subscription = self.create_subscription(
