@@ -13,42 +13,37 @@ class MarkerFollowerNode(Node):
     def __init__(self):
         super().__init__('marker_follower_node')
         
-        # Subscribe to the pose estimation image output
         self.subscription = self.create_subscription(
             Image, '/pose_estimation/output_image', self.image_callback, 10)
         
-        # Publisher for robot velocity commands
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        # CvBridge for converting between ROS and OpenCV images
         self.bridge = CvBridge()
         
         # ArUco detector setup
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100)
         self.parameters = cv2.aruco.DetectorParameters()
         
-        # Target parameters
-        self.target_marker_size = 100  # Target size in pixels
-        self.target_x_position = 640   # Center of 1280-width frame
-        self.target_y_position = 360   # Center of 720-height frame
+        self.target_marker_size = 100
+        self.target_x_position = 640  
+        self.target_y_position = 360 
         
-        # PID controller parameters - REDUCED VALUES
+        # PID controller parameters
         self.x_pid = PIDController(kp=0.0005, ki=0.00005, kd=0.0001)  # For x-axis positioning
         self.y_pid = PIDController(kp=0.0005, ki=0.00005, kd=0.0001)  # For y-axis positioning
         self.z_pid = PIDController(kp=0.0005, ki=0.00005, kd=0.0001)  # For distance/size control
         
         # Robot movement parameters
-        self.max_linear_speed = 0.2  # Reduced from 0.3 for more stability
-        self.max_angular_speed = 0.3  # Reduced from 0.5 for more stability
+        self.max_linear_speed = 0.2 
+        self.max_angular_speed = 0.3 
         
         # Search mode parameters
         self.search_mode = False
         self.search_timer = None
         self.last_marker_time = self.get_clock().now()
-        self.marker_timeout = 5.0  # 5 seconds without detection before starting search
-        self.marker_found = False  # Track if a marker has ever been found
+        self.marker_timeout = 5.0 
+        self.marker_found = False
         
-        # Flag to ensure we send stop commands when switching from marker-tracking to searching
         self.was_tracking = False
         
         self.get_logger().info("Marker follower node started with reduced PID values...")
@@ -62,11 +57,9 @@ class MarkerFollowerNode(Node):
         detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.parameters)
         corners, ids, rejected = detector.detectMarkers(gray)
         
-        # Initialize velocity command
         twist = Twist()
         
         if ids is not None and len(corners) > 0:
-            # Marker detected - reset search mode and update last detection time
             if self.search_mode:
                 self.get_logger().info("Marker found after searching")
                 # Reset PID controllers to avoid accumulated error
@@ -86,7 +79,7 @@ class MarkerFollowerNode(Node):
             marker_center_x = np.mean(marker_corners[:, 0])
             marker_center_y = np.mean(marker_corners[:, 1])
             
-            # Calculate marker size (average of width and height)
+            # Calculate marker size
             width = np.linalg.norm(marker_corners[0] - marker_corners[1])
             height = np.linalg.norm(marker_corners[1] - marker_corners[2])
             marker_size = (width + height) / 2
@@ -100,18 +93,14 @@ class MarkerFollowerNode(Node):
             x_correction = self.x_pid.update(x_error)
             y_correction = self.y_pid.update(y_error)
             z_correction = self.z_pid.update(z_error)
-            
-            # Convert corrections to robot velocities
-            # X correction controls rotation
+
             angular_z = x_correction
-            # Z correction controls forward/backward movement
             linear_x = z_correction
             
             # Apply limits
             twist.linear.x = max(min(linear_x, self.max_linear_speed), -self.max_linear_speed)
             twist.angular.z = max(min(angular_z, self.max_angular_speed), -self.max_angular_speed)
-            
-            # Apply a minimum threshold to avoid micro-movements
+
             if abs(twist.linear.x) < 0.01:
                 twist.linear.x = 0.0
             if abs(twist.angular.z) < 0.01:
@@ -131,7 +120,6 @@ class MarkerFollowerNode(Node):
         else:
             # No marker detected
             if self.was_tracking:
-                # Just switched from tracking to not tracking, ensure PIDs are reset
                 self.x_pid.reset()
                 self.y_pid.reset()
                 self.z_pid.reset()
@@ -144,35 +132,30 @@ class MarkerFollowerNode(Node):
                 if not self.search_mode:
                     self.get_logger().warning(f"No marker detected for {self.marker_timeout} seconds - starting search")
                     self.search_mode = True
-                # Apply search behavior only after timeout and if we've seen a marker before
-                twist.angular.z = 0.1  # Slow rotation to search for markers
-                twist.linear.x = 0.0  # Don't move forward during search
+                twist.angular.z = 0.1  
+                twist.linear.x = 0.0 
             else:
                 # Just stop if marker recently disappeared or never detected
                 search_status = "waiting" if self.marker_found else "no marker ever detected"
                 self.get_logger().warning(f"No marker detected - {search_status} ({time_since_last_marker:.1f}/{self.marker_timeout} sec)")
                 twist.linear.x = 0.0
                 twist.angular.z = 0.0
-        
-        # Debug info on screen
+
         status_text = "Searching" if self.search_mode else "Tracking" if ids is not None else "Waiting"
         cv2.putText(frame, f"Status: {status_text}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        
-        # Publish velocity command
+
         self.cmd_vel_publisher.publish(twist)
-        
-        # Show the frame with debug info
+
         cv2.imshow("Marker Follower", frame)
         cv2.waitKey(1)
 
     def destroy_node(self):
         self.get_logger().info("Shutting down marker follower node...")
         cv2.destroyAllWindows()
-        # Send a zero velocity command multiple times before shutting down
         stop_twist = Twist()
-        for _ in range(10):  # Send multiple times for reliability
+        for _ in range(10):
             self.cmd_vel_publisher.publish(stop_twist)
-            time.sleep(0.5)  # Add delay between commands
+            time.sleep(0.5)
         self.get_logger().info("Node shutdown complete")
         super().destroy_node()
 
